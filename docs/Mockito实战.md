@@ -7,7 +7,9 @@
 Mockito是Java流行的一种Mock框架，使用Mock技术能让我们隔离外部依赖以便对我们自己的业务逻辑代码进行单元测试，在编写单元测试时，不需要再进行繁琐的初始化工作，在需要调用某一个接口时，直接模拟一个假方法，并任意指定方法的返回值。Mockito的工作原理是通过创建依赖对象的proxy，所有的调用先经过proxy对象，proxy对象拦截了所有的请求再根据预设的返回值进行处理。
 
 官网： https://site.mockito.org/
+
 文档：https://javadoc.io/doc/org.mockito/mockito-core/latest/org/mockito/Mockito.html
+
 github源码： https://github.com/mockito/mockito
 
 ### 1.2 为什么需要Mock
@@ -312,3 +314,498 @@ public class UserServiceUnitTest {
     }
 }
 ```
+
+### 2.4 高级特性
+
+#### **静态方法Mock**
+
+Mockito 3.4.0版本之后支持mock静态方法，需要使用MockedStatic来实现：
+
+```java
+public class StaticUtils {
+    public static String getStaticMessage() {
+        return "Hello Static";
+    }
+}
+
+@Test
+void mockStaticMethod() {
+    try (MockedStatic<StaticUtils> utilities = mockStatic(StaticUtils.class)) {
+        utilities.when(StaticUtils::getStaticMessage).thenReturn("Hello Mock");
+        assertEquals("Hello Mock", StaticUtils.getStaticMessage());
+    }
+}
+```
+
+#### **Final方法Mock**
+
+Mockito支持mock final方法和final类，不需要额外配置：
+
+```java
+public final class FinalClass {
+    public final String getFinalMessage() {
+        return "Hello Final";
+    }
+}
+
+@Test
+void mockFinalMethod() {
+    FinalClass finalClass = mock(FinalClass.class);
+    when(finalClass.getFinalMessage()).thenReturn("Hello Mock");
+    assertEquals("Hello Mock", finalClass.getFinalMessage());
+}
+```
+
+#### **私有方法Mock**
+
+对于私有方法，我们可以使用PowerMockito来实现mock：
+
+```java
+
+@RunWith(PowerMockRunner.class)
+@PrepareForTest(ClassWithPrivateMethod.class)
+public class PrivateMethodTest {
+
+    @Test
+    public void testPrivateMethod() throws Exception {
+        ClassWithPrivateMethod mock = spy(new ClassWithPrivateMethod());
+        doReturn("mocked").when(mock, "privateMethod");
+        assertEquals("mocked", mock.publicMethod());
+    }
+}
+```
+
+#### **参数捕获**
+
+使用ArgumentCaptor可以捕获方法调用时传入的参数：
+
+```java
+
+@Test
+public void captureArgument() {
+    List<String> list = mock(List.class);
+    ArgumentCaptor<String> argument = ArgumentCaptor.forClass(String.class);
+    list.add("Hello");
+    verify(list).add(argument.capture());
+    assertEquals("Hello", argument.getValue());
+}
+```
+
+#### **Answer机制**
+
+Answer允许我们自定义mock方法的行为：
+
+```java
+
+@Test
+public void answerTest() {
+    List<String> mock = mock(List.class);
+    when(mock.get(anyInt())).thenAnswer(invocation -> {
+        Integer index = invocation.getArgument(0);
+        return "Answer " + index;
+    });
+    assertEquals("Answer 0", mock.get(0));
+    assertEquals("Answer 1", mock.get(1));
+}
+```
+
+#### **连续调用**
+
+可以为同一个方法设置连续调用时的不同返回值：
+
+```java
+
+@Test
+public void consecutiveCallsTest() {
+    Iterator<String> mock = mock(Iterator.class);
+    when(mock.next())
+            .thenReturn("first")
+            .thenReturn("second")
+            .thenReturn("third");
+
+    assertEquals("first", mock.next());
+    assertEquals("second", mock.next());
+    assertEquals("third", mock.next());
+}
+```
+
+### 2.5 实战案例
+
+#### **Mock数据库连接**
+
+```java
+
+@Test
+public void mockDatabaseConnection() throws SQLException {
+    Connection connection = mock(Connection.class);
+    PreparedStatement statement = mock(PreparedStatement.class);
+    ResultSet resultSet = mock(ResultSet.class);
+
+    when(connection.prepareStatement(anyString())).thenReturn(statement);
+    when(statement.executeQuery()).thenReturn(resultSet);
+    when(resultSet.next()).thenReturn(true, false);
+    when(resultSet.getString("name")).thenReturn("John");
+
+    // 使用mock的数据库连接
+    assertEquals("John", getUserName(connection));
+}
+```
+
+#### **Mock HTTP请求**
+
+```java
+
+@Test
+public void mockHttpRequest() throws Exception {
+    HttpClient httpClient = mock(HttpClient.class);
+    HttpResponse response = mock(HttpResponse.class);
+    StatusLine statusLine = mock(StatusLine.class);
+
+    when(statusLine.getStatusCode()).thenReturn(200);
+    when(response.getStatusLine()).thenReturn(statusLine);
+    when(httpClient.execute(any(HttpGet.class))).thenReturn(response);
+
+    // 使用mock的HTTP客户端
+    assertEquals(200, getResponseStatus(httpClient));
+}
+```
+
+#### **Mock定时任务**
+
+```java
+
+@Test
+public void mockScheduledTask() {
+    ScheduledExecutorService executor = mock(ScheduledExecutorService.class);
+    when(executor.scheduleAtFixedRate(
+            any(Runnable.class),
+            anyLong(),
+            anyLong(),
+            any(TimeUnit.class)
+    )).thenReturn(null);
+
+    // 验证定时任务的调度
+    startScheduledTask(executor);
+    verify(executor).scheduleAtFixedRate(
+            any(Runnable.class),
+            eq(0L),
+            eq(1L),
+            eq(TimeUnit.SECONDS)
+    );
+}
+```
+
+#### **模拟方法内部调用**
+
+有时我们需要模拟方法内部的new对象操作或静态代码块：
+
+```java
+
+@Test
+public void mockInternalMethodCalls() {
+    // 模拟构造函数
+    whenNew(MyClass.class).withNoArguments().thenReturn(mockedObject);
+
+    // 模拟静态代码块
+    mockStatic(MyClass.class);
+    when(MyClass.staticMethod()).thenReturn("mocked");
+}
+```
+
+#### **Answer机制深入解析**
+
+thenAnswer和doAnswer的主要区别：
+
+- thenAnswer用于有返回值的方法
+- doAnswer用于void方法
+
+```java
+
+@Test
+public void advancedAnswerTest() {
+    List<String> mock = mock(List.class);
+
+    // thenAnswer示例
+    when(mock.get(anyInt())).thenAnswer(invocation -> {
+        int index = invocation.getArgument(0);
+        return String.format("Element at %d", index);
+    });
+
+    // doAnswer示例
+    doAnswer(invocation -> {
+        String arg = invocation.getArgument(0);
+        System.out.println("Adding: " + arg);
+        return null;
+    }).when(mock).add(anyString());
+}
+```
+
+#### **更多实战案例**
+
+**模拟Spring ApplicationContext**
+
+```java
+
+@Test
+public void mockApplicationContext() {
+    ApplicationContext context = mock(ApplicationContext.class);
+    MyService service = mock(MyService.class);
+    when(context.getBean(MyService.class)).thenReturn(service);
+
+    // 使用模拟的ApplicationContext
+    MyController controller = new MyController(context);
+    controller.doSomething();
+}
+```
+
+**模拟RestTemplate请求**
+
+```java
+
+@Test
+public void mockRestTemplate() {
+    RestTemplate restTemplate = mock(RestTemplate.class);
+    ResponseEntity<String> response = new ResponseEntity<>("success", HttpStatus.OK);
+
+    when(restTemplate.exchange(
+            anyString(),
+            eq(HttpMethod.POST),
+            any(HttpEntity.class),
+            eq(String.class)
+    )).thenReturn(response);
+
+    // 使用模拟的RestTemplate
+    MyApiClient client = new MyApiClient(restTemplate);
+    assertEquals("success", client.callApi());
+}
+```
+
+**模拟异步任务**
+
+```java
+
+@Test
+public void mockAsyncTask() {
+    CompletableFuture<String> future = mock(CompletableFuture.class);
+    when(future.get()).thenReturn("async result");
+
+    AsyncService service = mock(AsyncService.class);
+    when(service.asyncOperation()).thenReturn(future);
+
+    // 验证异步操作
+    assertEquals("async result", service.asyncOperation().get());
+}
+```
+
+#### **常见问题解决方案**
+
+**1. 模拟私有方法失败**
+
+```java
+
+@RunWith(PowerMockRunner.class)
+@PrepareForTest(ClassWithPrivateMethod.class)
+public class PrivateMethodTest {
+    @Test
+    public void mockPrivateMethod() throws Exception {
+        ClassWithPrivateMethod spy = spy(new ClassWithPrivateMethod());
+        PowerMockito.when(spy, "privateMethod").thenReturn("mocked");
+        assertEquals("mocked", spy.publicMethod());
+    }
+}
+```
+
+**2. Final类mock失败**
+
+```java
+// 在src/test/resources/mockito-extensions/org.mockito.plugins.MockMaker文件中添加：
+// mock-maker-inline
+
+@Test
+public void mockFinalClass() {
+    FinalClass mock = mock(FinalClass.class);
+    when(mock.finalMethod()).thenReturn("mocked");
+    assertEquals("mocked", mock.finalMethod());
+}
+```
+
+**3. 静态方法mock失败**
+
+```java
+
+@Test
+public void mockStaticMethod() {
+    try (MockedStatic<Utility> utilities = mockStatic(Utility.class)) {
+        utilities.when(() -> Utility.staticMethod()).thenReturn("mocked");
+        assertEquals("mocked", Utility.staticMethod());
+    }
+}
+```
+
+### 2.6 更多高级特性
+
+#### **模拟内部对象创建和Lambda表达式**
+
+```java
+
+@Test
+public void mockNewObjectAndLambda() {
+    // 模拟内部new对象
+    whenNew(Helper.class).withAnyArguments().thenReturn(mockedHelper);
+
+    // 模拟Lambda表达式
+    Function<String, Integer> mock = mock(Function.class);
+    when(mock.apply(anyString())).thenReturn(42);
+
+    // 验证Lambda调用
+    assertEquals(42, mock.apply("test"));
+}
+```
+
+#### **Spring相关Mock案例**
+
+```java
+// 模拟Spring事件
+@Test
+public void mockSpringEvent() {
+    ApplicationEventPublisher publisher = mock(ApplicationEventPublisher.class);
+    doNothing().when(publisher).publishEvent(any(MyEvent.class));
+
+    MyService service = new MyService(publisher);
+    service.doSomething();
+
+    verify(publisher).publishEvent(any(MyEvent.class));
+}
+
+// 模拟Spring缓存
+@Test
+public void mockSpringCache() {
+    Cache cache = mock(Cache.class);
+    when(cache.get(anyString())).thenReturn(null);
+    when(cache.get(eq("key"), any())).thenReturn("value");
+
+    CacheManager cacheManager = mock(CacheManager.class);
+    when(cacheManager.getCache(anyString())).thenReturn(cache);
+}
+
+// 模拟Spring Security
+@Test
+public void mockSpringSecurity() {
+    Authentication auth = mock(Authentication.class);
+    SecurityContext securityContext = mock(SecurityContext.class);
+    when(securityContext.getAuthentication()).thenReturn(auth);
+    SecurityContextHolder.setContext(securityContext);
+}
+```
+
+#### **复杂场景测试**
+
+```java
+// 多线程环境Mock
+@Test
+public void mockMultiThread() {
+    CountDownLatch latch = new CountDownLatch(2);
+    MyService service = mock(MyService.class);
+
+    when(service.process()).thenAnswer(invocation -> {
+        latch.countDown();
+        return "result";
+    });
+
+    // 启动多个线程调用mock对象
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    executor.submit(() -> service.process());
+    executor.submit(() -> service.process());
+
+    latch.await(1, TimeUnit.SECONDS);
+    verify(service, times(2)).process();
+}
+
+// 循环依赖Mock
+@Testpublic
+void mockCircularDependency() {
+    ServiceA serviceA = mock(ServiceA.class);
+    ServiceB serviceB = mock(ServiceB.class);
+
+    when(serviceA.getB()).thenReturn(serviceB);
+    when(serviceB.getA()).thenReturn(serviceA);
+
+    assertSame(serviceB, serviceA.getB());
+    assertSame(serviceA, serviceB.getA());
+}
+
+// 嵌套调用Mock
+@Test
+public void mockNestedCalls() {
+    Service1 service1 = mock(Service1.class);
+    Service2 service2 = mock(Service2.class);
+    Service3 service3 = mock(Service3.class);
+
+    when(service1.call()).thenReturn(service2);
+    when(service2.process()).thenReturn(service3);
+    when(service3.execute()).thenReturn("result");
+
+    assertEquals("result", service1.call().process().execute());
+}
+```
+
+### 2.7 性能优化
+
+#### **减少Mock对象数量**
+
+```java
+// 不推荐：为每个依赖创建mock
+@Test
+public void badPractice() {
+    Dependency1 dep1 = mock(Dependency1.class);
+    Dependency2 dep2 = mock(Dependency2.class);
+    Dependency3 dep3 = mock(Dependency3.class);
+    // ...
+}
+
+// 推荐：只mock必要的依赖
+@Test
+public void goodPractice() {
+    // 只mock真正需要的依赖
+    MainDependency mainDep = mock(MainDependency.class);
+}
+```
+
+#### **使用Spy代替Mock**
+
+```java
+
+@Test
+public void useSpyForBetterPerformance() {
+    // 使用spy保留真实对象的部分行为
+    List<String> list = new ArrayList<>();
+    List<String> spyList = spy(list);
+
+    // 只mock需要特殊处理的方法
+    when(spyList.size()).thenReturn(100);
+}
+```
+
+#### **优化验证方式**
+
+```java
+
+@Test
+public void optimizeVerification() {
+    Service service = mock(Service.class);
+
+    // 不推荐：频繁验证
+    service.method1();
+    verify(service).method1();
+    service.method2();
+    verify(service).method2();
+
+    // 推荐：批量验证
+    service.method1();
+    service.method2();
+    verify(service, times(1)).method1();
+    verify(service, times(1)).method2();
+}
+```
+
+
